@@ -2,54 +2,64 @@ import { ProductCardProps } from '@/assets/constants/types'
 import { COLORS } from '../assets/constants'
 import { Ionicons } from '@expo/vector-icons'
 import { Link } from 'expo-router'
-import { Image, View, TouchableOpacity,Text } from 'react-native'
+import { Image, View, TouchableOpacity, Text } from 'react-native'
+import { useWishlist } from '../context/WishlistContext'
 
 const ProductCard = ({ product }: ProductCardProps) => {
+  const { toggleWishlist, isInWishlist } = useWishlist()
+  const isLiked = isInWishlist(product._id)
 
-
-    const isLiked = false
   return (
-    <Link href={`/product/${product._id}`} asChild>
-      <TouchableOpacity className="mb-4 w-[48%] overflow-hidden rounded-lg bg-white">
-        <View className="relative h-56 w-full bg-gray-100">
-          <Image
-            source={{ uri: product.images?.[0] ?? '' }}
-            className="h-full w-full"
-            resizeMode="cover"
-          />
-          {/* Faviourte icon */}
-          <TouchableOpacity className='absolute top-2 right-2 z-10 p-2 bg-white rounded-full shadow-sm' onPress={(e)=> {e.stopPropagation();}}>
-                 <Ionicons name={isLiked ? 'heart': 'heart-outline'} size={20} color={isLiked ? COLORS.accent : COLORS.primary}/>
-          </TouchableOpacity>
-         
-            {/* IS FEATURED */}
+    <View className="relative mb-4 w-[48%] overflow-hidden rounded-lg bg-white">
+      <Link href={`/product/${product._id}`} asChild>
+        <TouchableOpacity>
+          <View className="relative h-56 w-full bg-gray-100">
+            <Image
+              source={{ uri: product.images?.[0] ?? '' }}
+              className="h-full w-full"
+              resizeMode="cover"
+            />
+
             {product.isFeatured && (
-                <View className='absolute top-2 left-2 bg-black px-2 py-1 rounded'>
-                    <Text  className="text-white text-xs font-bold uppercase">
-                        Featured
-                    </Text>
-                </View>
+              <View className="absolute left-2 top-2 rounded bg-black px-2 py-1">
+                <Text className="text-xs font-bold uppercase text-white">
+                  Featured
+                </Text>
+              </View>
             )}
-        </View>
+          </View>
 
+          <View className="p-3">
+            <View className="mb-1 flex-row items-center">
+              <Ionicons name="star" size={14} color="#FFD700" />
+              <Text className="ml-1 text-xs text-secondary">4.6</Text>
+            </View>
 
-        {/* product info */}
-        <View className='p-3'> 
-                <View className='flex-row items-center mb-1'>
-                    <Ionicons name='star' size={14} color='#FFD700' />
-                    <Text  className='text-secondary text-xs ml-1'>
-                            4.6
-                    </Text>
-                </View>
+            <Text
+              className="mb-1 text-sm font-medium text-primary"
+              numberOfLines={1}
+            >
+              {product.name}
+            </Text>
 
-               <Text className='text-primary font-medium text-sm mb-1' numberOfLines={1}>{product.name}</Text>
-               <View className='flex-row items-center'>
-                <Text className='text-primary font-bold text-base'>${product.price.toFixed(2)}</Text>
-               </View>
-        </View>
+            <Text className="text-base font-bold text-primary">
+              ${product.price.toFixed(2)}
+            </Text>
+          </View>
+        </TouchableOpacity>
+      </Link>
 
+      <TouchableOpacity
+        className="absolute right-2 top-2 z-10 rounded-full bg-white p-2 shadow-sm"
+        onPress={() => toggleWishlist(product)}
+      >
+        <Ionicons
+          name={isLiked ? 'heart' : 'heart-outline'}
+          size={20}
+          color={isLiked ? COLORS.accent : COLORS.primary}
+        />
       </TouchableOpacity>
-    </Link>
+    </View>
   )
 }
 
