@@ -73,6 +73,8 @@ export default function Home() {
                   resizeMode="cover"
                 />
 
+                <View className="absolute inset-0 bg-black/40" />
+
                 <View className="absolute bottom-4 left-4 z-10">
                   <Text className="text-2xl font-bold text-white">
                     {banner.title}
@@ -88,8 +90,6 @@ export default function Home() {
                     </Text>
                   </TouchableOpacity>
                 </View>
-
-                <View className="absolute inset-0 bg-black/40" />
               </View>
             ))}
           </ScrollView>
@@ -153,14 +153,17 @@ export default function Home() {
           )}
         </View>
 
-
-        {/* NewSletter CTA */}
-        <View className='bg-gray-100 p-6 rounded-2xl mb-2 items-center'>
-          <Text className='text-2xl font-bold text-primary mb-2 text-center'>Join the Revolution</Text>
-          <Text className='text-secondary text-center mb-4'>Subscribe to our newsletter and get 10% off your first purchase</Text>
-          <TouchableOpacity className='bg-primary w-4/5 py-3 rounded-full items-center'>
-            <Text className='text-white font-medium text-base'>
-                Subscribe Now
+        {/* Newsletter CTA */}
+        <View className="mb-2 items-center rounded-2xl bg-gray-100 p-6">
+          <Text className="mb-2 text-center text-2xl font-bold text-primary">
+            Join the Revolution
+          </Text>
+          <Text className="mb-4 text-center text-secondary">
+            Subscribe to our newsletter and get 10% off your first purchase
+          </Text>
+          <TouchableOpacity className="w-4/5 items-center rounded-full bg-primary py-3">
+            <Text className="text-base font-medium text-white">
+              Subscribe Now
             </Text>
           </TouchableOpacity>
         </View>
