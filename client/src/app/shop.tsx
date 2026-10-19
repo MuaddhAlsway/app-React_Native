@@ -1,12 +1,18 @@
 import { dummyProducts } from '@/assets/assets'
 import { Product } from '@/assets/constants/types'
 import { useEffect, useState } from 'react'
-import { ActivityIndicator, TouchableOpacity, View } from 'react-native'
+import {
+  ActivityIndicator,
+  FlatList,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import Header from '../../components/Header'
 import { Ionicons } from '@expo/vector-icons'
 import { COLORS } from '@/assets/constants'
-import { FlatList, Text, TextInput } from 'react-native-gesture-handler'
 import ProductCard from '../../components/ProductCard'
 
 export default function Shop() {
