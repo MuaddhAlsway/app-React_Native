@@ -1,5 +1,5 @@
 import { Stack } from "expo-router";
-import { COLORS } from "@/constants";
+import { COLORS } from "@/assets/constants";
 
 export default function ProductsLayout() {
     return (

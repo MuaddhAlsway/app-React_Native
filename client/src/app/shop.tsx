@@ -10,10 +10,10 @@ import {
   View,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import Header from '../../components/Header'
+import Header from '../components/Header'
 import { Ionicons } from '@expo/vector-icons'
 import { COLORS } from '@/assets/constants'
-import ProductCard from '../../components/ProductCard'
+import ProductCard from '../components/ProductCard'
 
 export default function Shop() {
   const [product, setProducts] = useState<Product[]>([])
