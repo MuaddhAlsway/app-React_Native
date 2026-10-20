@@ -2,7 +2,7 @@ import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import { ScrollView, Text, TouchableOpacity, View, ActivityIndicator, RefreshControl, Image, Alert } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { COLORS } from "@/constants";
+import { COLORS } from "@/assets/constants";
 import { dummyProducts } from "@/assets/assets";
 
 export default function AdminProducts() {

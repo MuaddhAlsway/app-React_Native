@@ -8,14 +8,14 @@ import {
   View,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import Header from '../../../components/Header'
+import Header from '../../components/Header'
 import { BANNERS, dummyProducts } from '@/assets/assets'
 import { useEffect, useState } from 'react'
 import { useRouter } from 'expo-router'
 import { CATEGORIES } from '@/assets/constants'
-import CategoryItem from '../../../components/CategoryItem'
+import CategoryItem from '../../components/CategoryItem'
 import { Product } from '@/assets/constants/types'
-import ProductCard from '../../../components/ProductCard'
+import ProductCard from '../../components/ProductCard'
 
 const { width } = Dimensions.get('window')
 

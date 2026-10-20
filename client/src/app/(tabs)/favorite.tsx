@@ -3,8 +3,8 @@ import { useWishlist } from '../../../context/WishlistContext'
 import { useRouter } from 'expo-router'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { ScrollView } from 'react-native-gesture-handler'
-import Header from '../../../components/Header'
-import ProductCard from '../../../components/ProductCard'
+import Header from '../../components/Header'
+import ProductCard from '../../components/ProductCard'
 
 export default function Favorite() {
   const { wishlist } = useWishlist()

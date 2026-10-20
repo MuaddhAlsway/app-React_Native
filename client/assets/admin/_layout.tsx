@@ -2,7 +2,7 @@ import { Tabs, useRouter } from "expo-router";
 import { useEffect } from "react";
 import { View, ActivityIndicator, TouchableOpacity, Text } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { COLORS } from "@/constants";
+import { COLORS } from "@/assets/constants";
 import { dummyUser } from "@/assets/assets";
 
 export default function AdminLayout() {

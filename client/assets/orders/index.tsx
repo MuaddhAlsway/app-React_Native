@@ -4,8 +4,8 @@ import { FlatList, Text, TouchableOpacity, View, ActivityIndicator, ScrollView, 
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Header from "@/components/Header";
-import { COLORS, getStatusColor } from "@/constants";
-import type { Order } from "@/constants/types";
+import { COLORS, getStatusColor } from "@/assets/constants";
+import type { Order } from "@/assets/constants/types";
 import { dummyOrders, formatDate } from "@/assets/assets";
 
 export default function Orders() {

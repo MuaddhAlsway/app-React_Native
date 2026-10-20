@@ -1,9 +1,9 @@
 import { ProductCardProps } from '@/assets/constants/types'
-import { COLORS } from '../assets/constants'
+import { COLORS } from '@/assets/constants'
 import { Ionicons } from '@expo/vector-icons'
 import { Link } from 'expo-router'
 import { Image, View, TouchableOpacity, Text } from 'react-native'
-import { useWishlist } from '../context/WishlistContext'
+import { useWishlist } from '../../context/WishlistContext'
 
 const ProductCard = ({ product }: ProductCardProps) => {
   const { toggleWishlist, isInWishlist } = useWishlist()

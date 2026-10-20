@@ -1,5 +1,5 @@
 import { CategoryItemProps } from '@/assets/constants/types'
-import { COLORS } from '../assets/constants'
+import { COLORS } from '@/assets/constants'
 import { Ionicons } from '@expo/vector-icons'
 import { View, Text, TouchableOpacity } from 'react-native'
 
