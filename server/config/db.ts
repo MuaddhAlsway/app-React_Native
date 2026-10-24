@@ -73,6 +73,9 @@ const connectDB = async (): Promise<void> => {
     );
   }
 
+  const uriScheme = mongoUri.match(/^mongodb(\+srv)?:\/\//i)?.[0]?.replace(/:\/\/$/, "") ?? "unknown";
+  console.log(`MongoDB URI scheme: ${uriScheme}`);
+
   if (!/^mongodb(\+srv)?:\/\//i.test(mongoUri)) {
     throw new Error("MONGODB_URI has an invalid scheme. Expected mongodb:// or mongodb+srv://.");
   }
