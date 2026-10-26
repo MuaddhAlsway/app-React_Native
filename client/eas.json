@@ -26,6 +26,16 @@
       "env": {
         "EXPO_PUBLIC_API_URL": "https://ecom-native-app-server-psi.vercel.app/api",
         "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_test_ZmluZS1lbXUtMjM5NS5jbGVyay5hY2NvdW50cy5kZXYk"
+      },
+      "android": {
+        "buildType": "app-bundle"
+      }
+    }
+  },
+  "submit": {
+    "production": {
+      "android": {
+        "track": "internal"
       }
     }
   }
