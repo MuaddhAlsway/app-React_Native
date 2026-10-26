@@ -1,10 +1,2 @@
-import { Request } from "express";
-
-declare global {
-    namespace Express {
-        interface Request {
-            user?: any;
-            auth?: any;
-        }
-    }
-}
+import './express.js';
+export {};

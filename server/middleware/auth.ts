@@ -1,9 +1,11 @@
+import '../types/express.js'
+import { getAuth } from '@clerk/express'
 import User from '../models/User.js'
 import type { NextFunction, Request, Response } from 'express'
 
 export const protect = async (req: Request, res: Response, next: NextFunction) => {
     try {
-        const { userId } = await req.auth()
+        const { userId } = getAuth(req)
 
         if (!userId) {
             return res.status(401).json({

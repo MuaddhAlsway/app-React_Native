@@ -1,3 +1,4 @@
+import type {} from './express.js';
 import { Document, Types } from "mongoose";
 
 export interface IAddress extends Document {
