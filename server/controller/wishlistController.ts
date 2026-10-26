@@ -6,18 +6,12 @@ import Product from '../models/Products.js'
 // Get the current user's wishlist
 // GET /api/wishlist
 export const getWishlist = async (req: Request, res: Response) => {
+    res.setHeader("Cache-Control", "private, no-store");
     try {
-        let wishlist = await Wishlist.findOne({ user: req.user._id })
+        const wishlist = await Wishlist.findOne({ user: req.user._id })
             .populate('products')
-
-        if (!wishlist) {
-            wishlist = await Wishlist.create({
-                user: req.user._id,
-                products: [],
-            })
-        }
-
-        return res.json({ success: true, data: wishlist })
+        // Reading Favorites must not create empty database records.
+        return res.json({ success: true, data: wishlist ?? { user: req.user._id, products: [] } })
     } catch (error: any) {
         return res.status(500).json({ success: false, message: error.message })
     }
@@ -81,12 +75,7 @@ if (!productId || !mongoose.Types.ObjectId.isValid(productId)) {
             { new: true },
         ).populate('products')
 
-        if (!wishlist) {
-            return res.status(404).json({
-                success: false,
-                message: 'Wishlist not found',
-            })
-        }
+        if (!wishlist) return res.json({ success: true, data: { user: req.user._id, products: [] } })
 
         return res.json({ success: true, data: wishlist })
     } catch (error: any) {

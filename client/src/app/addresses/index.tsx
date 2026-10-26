@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons'
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useRef, useState } from 'react'
 import {
   ScrollView,
   Text,
@@ -11,9 +11,13 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import Header from '../../components/Header'
-import { COLORS } from '@/assets/constants'
+import { COLORS } from "@/assets/constants";
 import type { Address } from '@/assets/constants/types'
-import { dummyAddress } from '@/assets/assets'
+import { useAuth } from '@clerk/clerk-expo'
+import { useFocusEffect } from 'expo-router'
+import axios from 'axios'
+import api from '../../../constants/api'
+import Toast from 'react-native-toast-message'
 
 export default function Addresses() {
   const [addresses, setAddresses] = useState<Address[]>([])
@@ -34,35 +38,112 @@ export default function Addresses() {
   const [isEditing, setIsEditing] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
 
-  useEffect(() => {
-    fetchAddresses()
-  }, [])
+  const { getToken, isLoaded, isSignedIn, userId } = useAuth()
+  // Clerk Expo wraps getToken in a new function each render.
+  const getTokenRef = useRef(getToken)
+  getTokenRef.current = getToken
+  const owner = useRef(userId)
+  owner.current = userId
+  const [error, setError] = useState('')
+  const [formError, setFormError] = useState('')
+  const [retry, setRetry] = useState(0)
+  const [pendingDelete, setPendingDelete] = useState<Address | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
+  const messageFor = (error: unknown) => axios.isAxiosError(error) ? error.response?.data?.message || error.message : error instanceof Error ? error.message : 'Request failed.'
+  const authHeaders = useCallback(async () => {
+    if (!isSignedIn) throw new Error('Sign in to manage your addresses.')
+    const token = await getTokenRef.current()
+    if (!token) throw new Error('Please sign in again.')
+    return { Authorization: 'Bearer ' + token }
+  }, [isSignedIn])
 
-  const fetchAddresses = async () => {
-    setAddresses(dummyAddress as any)
-    setLoading(false)
-  }
+  useFocusEffect(useCallback(() => {
+    if (!isLoaded) return
+    let active = true
+    const controller = new AbortController()
+    setAddresses([])
+    setModalVisible(false)
+    setPendingDelete(null)
+    setLoading(true)
+    setError('')
+    const fetchAddresses = async () => {
+      try {
+        const headers = await authHeaders()
+        const { data } = await api.get('/addresses', { headers, signal: controller.signal })
+        if (!data.success || !Array.isArray(data.data)) throw new Error(data.message || 'Could not load addresses.')
+        if (active) setAddresses(data.data)
+      } catch (error) { if (active) setError(messageFor(error)) }
+      finally { if (active) setLoading(false) }
+    }
+    void fetchAddresses()
+    return () => { active = false; controller.abort() }
+  }, [isLoaded, isSignedIn, userId, authHeaders, retry]))
 
   const handleEditSearch = (item: Address) => {
+    if (submitting || deleting) return
+    setFormError('')
     setIsEditing(true)
     setEditingId(item._id)
     setType(item.type)
-    setStreet(item.street)
-    setCity(item.city)
-    setState(item.state)
-    setZipCode(item.zipCode)
-    setCountry(item.country)
+    setStreet(item.street || '')
+    setCity(item.city || '')
+    setState(item.state || '')
+    setZipCode(item.zipCode || '')
+    setCountry(item.country || '')
     setIsDefault(item.isDefault)
     setModalVisible(true)
   }
 
   const handleSaveAddress = async () => {
-    setModalVisible(false)
-    resetForm()
-    fetchAddresses()
+    if (submitting || deleting) return
+    const payload = { type, street: street.trim(), city: city.trim(), state: state.trim(), zipCode: zipCode.trim(), country: country.trim(), isDefault }
+    if (!payload.street || !payload.city || !payload.state || !payload.zipCode || !payload.country) {
+      setFormError('Fill in all address fields.')
+      return
+    }
+    if (isEditing && !editingId) { setFormError('Address ID is missing.'); return }
+    const currentOwner = userId
+    setSubmitting(true)
+    setFormError('')
+    try {
+      const headers = await authHeaders()
+      if (owner.current !== currentOwner) return
+      const { data } = isEditing
+        ? await api.put('/addresses/' + encodeURIComponent(editingId!), payload, { headers })
+        : await api.post('/addresses', payload, { headers })
+      if (!data.success || !data.data?._id) throw new Error(data.message || 'Could not save address.')
+      if (owner.current !== currentOwner) return
+      const saved: Address = data.data
+      setAddresses(previous => [...previous.filter(item => item._id !== saved._id).map(item => saved.isDefault ? { ...item, isDefault: false } : item), saved].sort((a, b) => Number(b.isDefault) - Number(a.isDefault)))
+      setModalVisible(false)
+      resetForm()
+      Toast.show({ type: 'success', text1: 'Address saved' })
+    } catch (error) { if (owner.current === currentOwner) setFormError(messageFor(error)) }
+    finally { setSubmitting(false) }
   }
 
-  const handleDeleteAddress = async (id: string) => {}
+  const handleDeleteAddress = (id: string) => {
+    if (submitting || deleting) return
+    setDeleteError('')
+    setPendingDelete(addresses.find(item => item._id === id) || null)
+  }
+  const confirmDeleteAddress = async () => {
+    if (!pendingDelete || deleting) return
+    const currentOwner = userId
+    setDeleting(true)
+    setDeleteError('')
+    try {
+      const headers = await authHeaders()
+      if (owner.current !== currentOwner) return
+      const { data } = await api.delete('/addresses/' + encodeURIComponent(pendingDelete._id), { headers })
+      if (!data.success) throw new Error(data.message || 'Could not delete address.')
+      if (owner.current !== currentOwner) return
+      setAddresses(previous => previous.filter(item => item._id !== pendingDelete._id))
+      setPendingDelete(null)
+    } catch (error) { if (owner.current === currentOwner) setDeleteError(messageFor(error)) }
+    finally { setDeleting(false) }
+  }
 
   const resetForm = () => {
     setStreet('')
@@ -77,6 +158,8 @@ export default function Addresses() {
   }
 
   const openAddModal = () => {
+    if (submitting || deleting) return
+    setFormError('')
     resetForm()
     setModalVisible(true)
   }
@@ -85,6 +168,7 @@ export default function Addresses() {
     <SafeAreaView className="flex-1 bg-surface" edges={['top']}>
       <Header title="Shipping Addresses" showBack />
 
+      {error ? <View className="items-center px-4 py-3"><Text className="mb-2 text-red-600">{error}</Text><TouchableOpacity onPress={() => setRetry(value => value + 1)}><Text className="font-bold text-primary">Retry</Text></TouchableOpacity></View> : null}
       {loading ? (
         <View className="flex-1 items-center justify-center">
           <ActivityIndicator size="large" color={COLORS.primary} />
@@ -171,7 +255,7 @@ export default function Addresses() {
         animationType="slide"
         transparent
         visible={modalVisible}
-        onRequestClose={() => setModalVisible(false)}
+        onRequestClose={() => { if (!submitting) setModalVisible(false) }}
       >
         <View className="flex-1 justify-end bg-black/50">
           <View className="h-[85%] rounded-t-3xl bg-white p-6">
@@ -180,12 +264,13 @@ export default function Addresses() {
                 {isEditing ? 'Edit Address' : 'Add New Address'}
               </Text>
 
-              <TouchableOpacity onPress={() => setModalVisible(false)}>
+              <TouchableOpacity disabled={submitting} onPress={() => setModalVisible(false)}>
                 <Ionicons name="close" size={24} color={COLORS.primary} />
               </TouchableOpacity>
             </View>
 
             <ScrollView showsVerticalScrollIndicator={false}>
+              {formError ? <Text accessibilityRole="alert" className="mb-4 text-red-600">{formError}</Text> : null}
               <Text className="mb-2 font-medium text-primary">Label</Text>
 
               <View className="mb-4 flex-row gap-3">
@@ -301,6 +386,19 @@ export default function Addresses() {
                 )}
               </TouchableOpacity>
             </ScrollView>
+          </View>
+        </View>
+      </Modal>
+      <Modal visible={pendingDelete !== null} transparent animationType="fade" onRequestClose={() => { if (!deleting) setPendingDelete(null) }}>
+        <View className="flex-1 items-center justify-center bg-black/50 px-6">
+          <View className="w-full max-w-sm rounded-2xl bg-white p-6" accessibilityViewIsModal>
+            <Text accessibilityRole="header" className="mb-3 text-xl font-bold text-primary">Delete address?</Text>
+            <Text className="mb-5 text-secondary">Remove your {pendingDelete?.type} address at {pendingDelete?.street}?</Text>
+            {deleteError ? <Text accessibilityRole="alert" className="mb-4 text-red-600">{deleteError}</Text> : null}
+            <View className="flex-row justify-end">
+              <TouchableOpacity disabled={deleting} onPress={() => setPendingDelete(null)} className="mr-3 rounded-xl bg-gray-100 px-5 py-3"><Text className="font-semibold text-primary">Cancel</Text></TouchableOpacity>
+              <TouchableOpacity disabled={deleting} onPress={() => { void confirmDeleteAddress() }} className="rounded-xl bg-red-600 px-5 py-3">{deleting ? <ActivityIndicator color="white" /> : <Text className="font-semibold text-white">Delete</Text>}</TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>

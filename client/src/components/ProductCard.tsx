@@ -6,7 +6,7 @@ import { Image, View, TouchableOpacity, Text } from 'react-native'
 import { useWishlist } from '../../context/WishlistContext'
 
 const ProductCard = ({ product }: ProductCardProps) => {
-  const { toggleWishlist, isInWishlist } = useWishlist()
+  const { toggleWishlist, isInWishlist, loading: wishlistLoading } = useWishlist()
   const isLiked = isInWishlist(product._id)
 
   return (
@@ -51,7 +51,10 @@ const ProductCard = ({ product }: ProductCardProps) => {
 
       <TouchableOpacity
         className="absolute right-2 top-2 z-10 rounded-full bg-white p-2 shadow-sm"
-        onPress={() => toggleWishlist(product)}
+        disabled={wishlistLoading}
+        accessibilityRole="button"
+        accessibilityLabel={isLiked ? "Remove from wishlist" : "Add to wishlist"}
+        onPress={() => { void toggleWishlist(product) }}
       >
         <Ionicons
           name={isLiked ? 'heart' : 'heart-outline'}

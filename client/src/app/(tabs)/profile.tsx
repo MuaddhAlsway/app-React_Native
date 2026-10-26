@@ -12,7 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import Header from '../../components/Header'
 import { ScrollView } from 'react-native-gesture-handler'
 import { Ionicons } from '@expo/vector-icons'
-import { COLORS, PROFILE_MENU } from '@/assets/constants'
+import { COLORS, PROFILE_MENU } from '../../../constants'
 import { useClerk } from '@clerk/clerk-expo'
 import * as ImagePicker from 'expo-image-picker'
 

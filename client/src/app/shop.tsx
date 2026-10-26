@@ -1,6 +1,8 @@
-import { dummyProducts } from '@/assets/assets'
+import api from '../../constants/api'
+import axios from 'axios'
+import { useFocusEffect } from 'expo-router'
 import { Product } from '@/assets/constants/types'
-import { useEffect, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   FlatList,
@@ -19,49 +21,55 @@ export default function Shop() {
   const [product, setProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
-  const [page, setPage] = useState(1)
-  const [hasMore, setHasMore] = useState(true)
+  const [error, setError] = useState('')
+  const [refreshing, setRefreshing] = useState(false)
+  const page = useRef(0)
+  const hasMore = useRef(true)
+  const request = useRef<AbortController | null>(null)
 
-  const fetchProducts = async (pageNumber = 1) => {
+  const fetchProducts = useCallback(async (pageNumber = 1, refresh = false) => {
+    if (request.current) return
+    const controller = new AbortController()
+    request.current = controller
+    setError('')
     if (pageNumber === 1) {
-      setLoading(true)
-    } else {
-      setLoadingMore(true)
-    }
-
+      if (refresh) setRefreshing(true)
+      else setLoading(true)
+    } else setLoadingMore(true)
     try {
-      const start = (pageNumber - 1) * 10
-      const end = start + 10
-      const paginatedData = dummyProducts.slice(start, end)
-
-      if (pageNumber === 1) {
-        setProducts(paginatedData)
-      } else {
-        setProducts((previousProducts) => [
-          ...previousProducts,
-          ...paginatedData,
-        ])
-      }
-
-      setHasMore(end < dummyProducts.length)
-      setPage(pageNumber)
+      const { data } = await api.get('/products', {
+        params: { page: pageNumber, limit: 10 }, signal: controller.signal,
+      })
+      if (!data.success || !Array.isArray(data.data) || !data.pagination) throw new Error(data.message || 'Could not load products.')
+      if (request.current !== controller) return
+      setProducts(previous => {
+        const combined: Product[] = pageNumber === 1 ? data.data : [...previous, ...data.data]
+        return [...new Map(combined.map(product => [product._id, product])).values()]
+      })
+      hasMore.current = pageNumber < data.pagination.pages
+      page.current = pageNumber
     } catch (error) {
-      console.error('Pagination error:', error)
+      if (request.current === controller) setError(axios.isAxiosError(error) ? error.response?.data?.message || error.message : error instanceof Error ? error.message : 'Could not load products.')
     } finally {
-      setLoading(false)
-      setLoadingMore(false)
+      if (request.current === controller) {
+        request.current = null
+        setLoading(false)
+        setLoadingMore(false)
+        setRefreshing(false)
+      }
     }
-  }
+  }, [])
 
   const loadMore = () => {
-    if (!loadingMore && !loading && hasMore) {
-      fetchProducts(page + 1)
-    }
+    if (!request.current && !error && hasMore.current && page.current > 0) void fetchProducts(page.current + 1)
   }
 
-  useEffect(() => {
-    fetchProducts(1)
-  }, [])
+  useFocusEffect(useCallback(() => {
+    page.current = 0
+    hasMore.current = true
+    void fetchProducts(1)
+    return () => { request.current?.abort(); request.current = null }
+  }, [fetchProducts]))
 
   return (
     <SafeAreaView className="flex-1 bg-surface" edges={['top']}>
@@ -97,6 +105,8 @@ export default function Shop() {
       ) : (
         <FlatList
           data={product}
+          refreshing={refreshing}
+          onRefresh={() => { void fetchProducts(1, true) }}
           keyExtractor={(item) => item._id}
           numColumns={2}
           contentContainerStyle={{ padding: 16, paddingBottom: 100 }}
@@ -109,11 +119,18 @@ export default function Shop() {
               <View className="py-4">
                 <ActivityIndicator size="small" color={COLORS.primary} />
               </View>
+            ) : error ? (
+              <View className="items-center py-4">
+                <Text className="mb-3 text-secondary">{error}</Text>
+                <TouchableOpacity accessibilityRole="button" onPress={() => { void fetchProducts(page.current + 1) }}>
+                  <Text className="font-bold text-primary">Retry</Text>
+                </TouchableOpacity>
+              </View>
             ) : null
           }
           ListEmptyComponent={
             <View className="flex-1 items-center justify-center py-20">
-              <Text className="text-secondary">No Product found</Text>
+              <Text className="text-secondary">{error ? 'Products unavailable' : 'No products found'}</Text>
             </View>
           }
         />

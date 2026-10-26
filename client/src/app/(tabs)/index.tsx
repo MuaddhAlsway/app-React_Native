@@ -9,13 +9,15 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import Header from '../../components/Header'
-import { BANNERS, dummyProducts } from '@/assets/assets'
-import { useEffect, useState } from 'react'
-import { useRouter } from 'expo-router'
-import { CATEGORIES } from '@/assets/constants'
+import { BANNERS } from '@/assets/assets'
+import { useCallback, useState } from 'react'
+import { useRouter, useFocusEffect } from 'expo-router'
+import { CATEGORIES } from "@/assets/constants";
 import CategoryItem from '../../components/CategoryItem'
-import { Product } from '@/assets/constants/types'
+import { Product } from "../../../constants/types";
 import ProductCard from '../../components/ProductCard'
+import api from '../../../constants/api'
+import axios from 'axios'
 
 const { width } = Dimensions.get('window')
 
@@ -27,14 +29,30 @@ export default function Home() {
 
   const categories = [{ id: 'all', name: 'All', icon: 'grid' }, ...CATEGORIES]
 
-  const fetchProducts = async () => {
-    setProduct(dummyProducts)
-    setLoading(false)
-  }
+  const [error, setError] = useState('')
+  const [retry, setRetry] = useState(0)
 
-  useEffect(() => {
-    fetchProducts()
-  }, [])
+  useFocusEffect(useCallback(() => {
+    let active = true
+    const controller = new AbortController()
+    const fetchProducts = async () => {
+      setLoading(true)
+      setError('')
+      try {
+        const { data } = await api.get('/products', {
+          params: { limit: 4 }, signal: controller.signal,
+        })
+        if (!data.success || !Array.isArray(data.data)) throw new Error(data.message || 'Could not load products.')
+        if (active) setProduct(data.data)
+      } catch (error) {
+        if (active) setError(axios.isAxiosError(error) ? error.response?.data?.message || error.message : error instanceof Error ? error.message : 'Could not load products.')
+      } finally {
+        if (active) setLoading(false)
+      }
+    }
+    void fetchProducts()
+    return () => { active = false; controller.abort() }
+  }, [retry]))
 
   return (
     <SafeAreaView className="flex-1" edges={['top']}>

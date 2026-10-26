@@ -15,7 +15,6 @@ ProductRouter.get('/:id', getProduct)
 // Create product (admin only)
 ProductRouter.post('/', upload.array("images", 5), protect, authorize('admin'), createProduct)
 
-
 // Update product (admin only)
 ProductRouter.put('/:id', upload.array("images", 5), protect, authorize('admin'), updateProduct)
 

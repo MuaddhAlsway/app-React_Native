@@ -18,6 +18,8 @@ const orderSchema = new mongoose.Schema<IOrder>(
             street: { type: String, required: true },
             city: { type: String, required: true },
             state: { type: String, required: true },
+            zipCode: String,
+            country: String,
         },
         paymentMethod: {
             type: String,
@@ -26,9 +28,12 @@ const orderSchema = new mongoose.Schema<IOrder>(
         },
         orderStatus: {
             type: String,
-            enum: ["placed", "shipped", "delivered", "cancelled"],
+            enum: ["placed", "processing", "shipped", "delivered", "cancelled"],
             default: "placed",
         },
+        paymentStatus: { type: String, enum: ["pending", "paid", "failed", "refunded"], default: "pending" },
+        subtotal: { type: Number, min: 0 },
+        shippingCost: { type: Number, min: 0 },
         tax: { type: Number, default: 0 },
         totalAmount: { type: Number, required: true },
         notes: String,

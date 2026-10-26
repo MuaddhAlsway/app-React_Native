@@ -1,10 +1,17 @@
-import { useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
+import { useRouter, useFocusEffect } from "expo-router";
+import React, { useCallback, useRef, useState } from "react";
 import { ScrollView, Text, View, ActivityIndicator, RefreshControl } from "react-native";
 import { COLORS, getStatusColor } from "@/assets/constants";
-import { dummyAdminStats } from "@/assets/assets";
+import api from "../../../constants/api";
+import axios from "axios";
+import { useAuth } from "@clerk/clerk-expo";
 
 export default function AdminDashboard() {
+    const { getToken, isLoaded, isSignedIn, userId } = useAuth()
+    const tokenRef = useRef(getToken);
+    tokenRef.current = getToken;
+    const [error, setError] = useState("");
+    const [retry, setRetry] = useState(0);
     const router = useRouter();
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
@@ -16,20 +23,31 @@ export default function AdminDashboard() {
         recentOrders: []
     });
 
-    const fetchStats = async () => {
-        setStats(dummyAdminStats as any);
-        setLoading(false);
-        setRefreshing(false);
-    };
-
-    useEffect(() => {
-        fetchStats();
-    }, []);
-
-    const onRefresh = () => {
-        setRefreshing(true);
-        fetchStats();
-    };
+    useFocusEffect(useCallback(() => {
+        if (!isLoaded) return;
+        let active = true;
+        const controller = new AbortController();
+        setLoading(true);
+        setError("");
+        const fetchStats = async () => {
+            try {
+                if (!isSignedIn) throw new Error("Sign in as an admin to view the dashboard.");
+                const token = await tokenRef.current();
+                if (!token) throw new Error("Please sign in again.");
+                const { data } = await api.get('/admin/stats', { headers: { Authorization: 'Bearer ' + token }, signal: controller.signal });
+                if (!data.success || !data.data) throw new Error(data.message || "Could not load dashboard.");
+                if (active) setStats(data.data);
+            } catch (cause) {
+                if (active) {
+                    setStats({ totalUsers: 0, totalProducts: 0, totalOrders: 0, totalRevenue: 0, recentOrders: [] });
+                    setError(axios.isAxiosError(cause) ? cause.response?.data?.message || cause.message : cause instanceof Error ? cause.message : "Could not load dashboard.");
+                }
+            } finally { if (active) { setLoading(false); setRefreshing(false); } }
+        };
+        void fetchStats();
+        return () => { active = false; controller.abort(); };
+    }, [isLoaded, isSignedIn, userId, retry]));
+    const onRefresh = () => { setRefreshing(true); setRetry(value => value + 1); };
 
     if (loading && !refreshing) {
         return (
@@ -44,6 +62,7 @@ export default function AdminDashboard() {
             className="flex-1 bg-surface p-4"
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         >
+            {error ? <Text accessibilityRole="alert" className="mb-4 text-red-600">{error}</Text> : null}
             <View className="mb-8">
                 <Text className="text-primary font-bold text-2xl mb-4 tracking-tight">Overview</Text>
                 <View className="flex-row flex-wrap justify-between">

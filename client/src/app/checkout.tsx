@@ -1,8 +1,10 @@
 import { View, Text, ActivityIndicator, TouchableOpacity } from 'react-native'
 import { useCart } from '../../context/CartContext'
-import { useRouter } from 'expo-router'
-import { useEffect, useState } from 'react'
-import { dummyAddress } from '@/assets/assets'
+import { useRouter, useFocusEffect } from 'expo-router'
+import { useCallback, useRef, useState } from 'react'
+import { useAuth } from '@clerk/clerk-expo'
+import axios from 'axios'
+import api from '../../constants/api'
 import { Address } from '@/assets/constants/types'
 import Toast from 'react-native-toast-message'
 import { SafeAreaView } from 'react-native-safe-area-context'
@@ -12,55 +14,79 @@ import { ScrollView } from 'react-native-gesture-handler'
 import { Ionicons } from '@expo/vector-icons'
 
 export default function Checkout() {
-  const { cartTotal } = useCart()
+  const { cartTotal, itemCount, isLoading: cartLoading, error: cartError, refreshCart } = useCart()
   const router = useRouter()
 
   const [loading, setLoading] = useState(false)
   const [pageLoading, setPageLoading] = useState(true)
-  const [seletectedAddress, setSelectedAddress] = useState<Address | null>(null)
+  const [selectedAddress, setSelectedAddress] = useState<Address | null>(null)
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'stripe'>('cash')
 
   const shipping = 2.0
   const tax = 0
   const total = cartTotal + shipping + tax
 
-  const fetchAddress = async () => {
-    const addrList = dummyAddress
+  const { getToken, isLoaded, isSignedIn, userId } = useAuth()
+  const getTokenRef = useRef(getToken)
+  getTokenRef.current = getToken
+  const currentUser = useRef(userId)
+  currentUser.current = userId
+  const submitting = useRef(false)
+  const [error, setError] = useState('')
+  const [retry, setRetry] = useState(0)
 
-    if (addrList.length > 0) {
-      const def =
-        addrList.find((address: any) => address.isDefault) || addrList[0]
-      setSelectedAddress(def as Address)
+  useFocusEffect(useCallback(() => {
+    if (!isLoaded) return
+    let active = true
+    const controller = new AbortController()
+    setPageLoading(true)
+    setSelectedAddress(null)
+    setError('')
+    const fetchAddress = async () => {
+      try {
+        if (!isSignedIn) throw new Error('Sign in to check out.')
+        const token = await getTokenRef.current()
+        if (!token) throw new Error('Please sign in again.')
+        const { data } = await api.get('/addresses', { headers: { Authorization: 'Bearer ' + token }, signal: controller.signal })
+        if (!data.success || !Array.isArray(data.data)) throw new Error(data.message || 'Could not load addresses.')
+        if (active) setSelectedAddress(data.data.find((address: Address) => address.isDefault) || data.data[0] || null)
+      } catch (cause) {
+        if (active) setError(axios.isAxiosError(cause) ? cause.response?.data?.message || cause.message : cause instanceof Error ? cause.message : 'Could not load addresses.')
+      } finally { if (active) setPageLoading(false) }
     }
-
-    setPageLoading(false)
-  }
+    void fetchAddress()
+    return () => { active = false; controller.abort() }
+  }, [isLoaded, isSignedIn, userId, retry]))
 
   const handlePlaceOrder = async () => {
-    if (!seletectedAddress) {
-      Toast.show({
-        type: 'error',
-        text1: 'Error',
-        text2: 'Please add a shipping address',
-      })
+    if (submitting.current || cartLoading) return
+    if (!selectedAddress || itemCount < 1 || cartError) {
+      Toast.show({ type: 'error', text1: 'Cannot place order', text2: cartError || (itemCount < 1 ? 'Your cart is empty.' : 'Please add a shipping address.') })
       return
     }
-
-    if (paymentMethod === 'stripe') {
-      Toast.show({
-        type: 'error',
-        text1: 'Info',
-        text2: 'Stripe not implemented yet',
-      })
+    if (paymentMethod !== 'cash') {
+      Toast.show({ type: 'info', text1: 'Card payment unavailable', text2: 'Choose cash on delivery.' })
       return
     }
-
-    router.replace('/orders')
+    const owner = userId
+    submitting.current = true
+    setLoading(true)
+    let created = false
+    try {
+      const token = await getTokenRef.current()
+      if (!token || currentUser.current !== owner) throw new Error('Please sign in again.')
+      const { data } = await api.post('/orders', { addressId: selectedAddress._id, paymentMethod: 'cash' }, { headers: { Authorization: 'Bearer ' + token } })
+      if (!data.success || !data.data?._id) throw new Error(data.message || 'Could not place order.')
+      created = true
+      if (currentUser.current !== owner) return
+      // The server already cleared the cart as part of checkout. Only reload it.
+      await refreshCart()
+      Toast.show({ type: 'success', text1: 'Order placed', text2: 'Your cash-on-delivery order was saved.' })
+      router.replace('/orders')
+    } catch (cause) {
+      Toast.show({ type: 'error', text1: created ? 'Order saved; refresh your orders' : 'Could not place order', text2: axios.isAxiosError(cause) ? cause.response?.data?.message || cause.message : cause instanceof Error ? cause.message : 'Please check your orders before retrying.' })
+    } finally { submitting.current = false; setLoading(false) }
   }
-
-  useEffect(() => {
-    fetchAddress()
-  }, [])
 
   if (pageLoading) {
     return (
@@ -73,6 +99,8 @@ export default function Checkout() {
   return (
     <SafeAreaView className="flex-1 bg-surface" edges={['top']}>
       <Header title="Checkout" showBack />
+      {error ? <View className="items-center px-4 py-3"><Text className="mb-2 text-red-600">{error}</Text><TouchableOpacity onPress={() => setRetry(value => value + 1)}><Text className="font-bold text-primary">Retry</Text></TouchableOpacity></View> : null}
+      {cartError ? <Text className="px-4 py-2 text-red-600">{cartError}</Text> : null}
 
       <ScrollView className="mt-4 flex-1 px-4">
         {/* Address Action */}
@@ -80,24 +108,24 @@ export default function Checkout() {
           Shipping Address
         </Text>
 
-        {seletectedAddress ? (
+        {selectedAddress ? (
           <View className="mb-6 rounded-xl bg-white p-4 shadow-sm">
             <View className="mb-2 flex-row items-center justify-between">
               <Text className="text-base font-bold">
-                {seletectedAddress.type}
+                {selectedAddress.type}
               </Text>
 
-              <TouchableOpacity onPress={() => router.push('/addresses')}>
+              <TouchableOpacity disabled={loading} onPress={() => router.push('/addresses')}>
                 <Text>Change</Text>
               </TouchableOpacity>
             </View>
 
             <Text className="leading-5 text-secondary">
-              {seletectedAddress.street}, {seletectedAddress.city}
+              {selectedAddress.street}, {selectedAddress.city}
               {'\n'}
-              {seletectedAddress.state} {seletectedAddress.zipCode}
+              {selectedAddress.state} {selectedAddress.zipCode}
               {'\n'}
-              {seletectedAddress.country}
+              {selectedAddress.country}
             </Text>
           </View>
         ) : (
@@ -194,7 +222,7 @@ export default function Checkout() {
             </View>
          {/* Shipping */}
             <View className='flex-row justify-between mb-2'>
-                <Text className='text-secondary'>Subtotal</Text>
+                <Text className='text-secondary'>Shipping</Text>
                 <Text className='font-bold'>${shipping.toFixed(2)}</Text>
             </View>
             
@@ -212,7 +240,7 @@ export default function Checkout() {
             </View>
             {/* Place Order Button */}
             <TouchableOpacity className={`p-4 rounded-xl items-center ${loading ? 'bg-gray-400':'bg-primary'}`}
-            onPress={handlePlaceOrder} disabled={loading}>
+            onPress={handlePlaceOrder} disabled={loading || cartLoading || !!cartError || !!error || !selectedAddress || itemCount < 1}>
                 {loading ? <ActivityIndicator color='white'/> :  
                 <Text className='text-white font-bold text-lg'>Place Order</Text>
                 }

@@ -1,5 +1,5 @@
-import { useLocalSearchParams, useRouter } from 'expo-router'
-import { useEffect, useState } from 'react'
+import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router'
+import { useCallback, useState } from 'react'
 import {
   View,
   Text,
@@ -9,7 +9,8 @@ import {
   TouchableOpacity,
 } from 'react-native'
 import { useWishlist } from '../../../context/WishlistContext'
-import { dummyProducts } from '@/assets/assets'
+import api from '../../../constants/api'
+import axios from 'axios'
 import { useCart } from '../../../context/CartContext'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { COLORS } from '@/assets/constants'
@@ -31,19 +32,34 @@ export default function ProductDetails() {
   const [activeImageIndex, setActiveImageIndex] = useState(0)
 
   const { addToCart, itemCount } = useCart()
-  const { toggleWishlist, isInWishlist } = useWishlist()
+  const { toggleWishlist, isInWishlist, loading: wishlistLoading } = useWishlist()
 
-  useEffect(() => {
+  const [error, setError] = useState('')
+  const [retry, setRetry] = useState(0)
+
+  useFocusEffect(useCallback(() => {
+    let active = true
+    const controller = new AbortController()
+    setLoading(true)
+    setProduct(null)
+    setSelectedSize(null)
+    setActiveImageIndex(0)
+    setError('')
     const fetchProduct = async () => {
-      const foundProduct = dummyProducts.find(
-        (item) => item._id === productId,
-      )
-      setProduct(foundProduct ?? null)
-      setLoading(false)
+      try {
+        if (!productId || !/^[a-f0-9]{24}$/i.test(productId)) throw new Error('Invalid product ID.')
+        const { data } = await api.get('/products/' + encodeURIComponent(productId), { signal: controller.signal })
+        if (!data.success || !data.data) throw new Error(data.message || 'Product not found.')
+        const item = data.data
+        const sizes: string[] = Array.isArray(item.sizes) ? item.sizes.filter((size: unknown): size is string => typeof size === 'string' && size.trim().length > 0).map((size: string) => size.trim()) : []
+        if (active) setProduct({ ...item, sizes: [...new Set(sizes)], images: Array.isArray(item.images) ? item.images.filter((image: unknown) => typeof image === 'string' && /^https?:\/\//.test(image)) : [] })
+      } catch (error) {
+        if (active) setError(axios.isAxiosError(error) ? error.response?.data?.message || error.message : error instanceof Error ? error.message : 'Could not load product.')
+      } finally { if (active) setLoading(false) }
     }
-
-    fetchProduct()
-  }, [productId])
+    void fetchProduct()
+    return () => { active = false; controller.abort() }
+  }, [productId, retry]))
 
   if (loading) {
     return (
@@ -56,7 +72,9 @@ export default function ProductDetails() {
   if (!product) {
     return (
       <SafeAreaView className="flex-1 items-center justify-center">
-        <Text>Product not found</Text>
+        <Text className="mb-4 text-secondary">{error || 'Product not found'}</Text>
+        <TouchableOpacity accessibilityRole="button" onPress={() => setRetry(value => value + 1)}><Text className="mb-4 font-bold text-primary">Retry</Text></TouchableOpacity>
+        <TouchableOpacity accessibilityRole="button" onPress={() => router.canGoBack() ? router.back() : router.replace('/shop')}><Text className="text-primary">Back to shop</Text></TouchableOpacity>
       </SafeAreaView>
     )
   }
@@ -126,7 +144,8 @@ export default function ProductDetails() {
             </TouchableOpacity>
 
             <TouchableOpacity
-              onPress={() => toggleWishlist(product)}
+              disabled={wishlistLoading}
+              onPress={() => { void toggleWishlist(product) }}
               className="h-10 w-10 items-center justify-center rounded-full bg-white/80"
               accessibilityRole="button"
               accessibilityLabel={
@@ -166,8 +185,8 @@ export default function ProductDetails() {
 
           <View className="mb-2 flex-row items-start">
             <Ionicons name="star" size={14} color="#FFD700" />
-            <Text className="ml-1 text-sm font-bold">4.6</Text>
-            <Text className="ml-1 text-xs text-secondary">(85)</Text>
+            <Text className="ml-1 text-sm font-bold">{product.ratings?.average ?? "No ratings"}</Text>
+            <Text className="ml-1 text-xs text-secondary">({product.ratings?.count ?? 0})</Text>
           </View>
 
           {/* Price */}
