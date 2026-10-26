@@ -119,4 +119,6 @@ export type WishlistContextType = {
     toggleWishlist: (product: Product) => void;
     isInWishlist: (productId: string) => boolean;
     loading: boolean;
+    error: string;
+    refreshWishlist: () => Promise<void>;
 };

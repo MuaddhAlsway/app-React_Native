@@ -2,6 +2,7 @@ import { HeaderProps } from '@/assets/constants/types'
 import { COLORS } from '@/assets/constants'
 import { Ionicons } from '@expo/vector-icons'
 import { useRouter } from 'expo-router'
+import { useCart } from '../../context/CartContext'
 import { Image, Text, TouchableOpacity, View } from 'react-native'
 
 export default function Header({
@@ -13,7 +14,7 @@ export default function Header({
   showLogo,
 }: HeaderProps) {
   const router = useRouter()
-  const itemCount = 6
+  const { itemCount } = useCart()
 
   return (
     <View className="flex-row items-center justify-between bg-white px-4 py-3">
@@ -21,7 +22,7 @@ export default function Header({
       <View className="flex-1 flex-row items-center">
         {showBack && (
           <TouchableOpacity
-            onPress={() => router.back()}
+            onPress={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)'))}
             className="mr-3"
             accessibilityRole="button"
             accessibilityLabel="Go back"

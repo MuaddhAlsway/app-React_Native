@@ -1,13 +1,17 @@
-import React, { useEffect, useState } from "react";
-import { ScrollView, Text, TouchableOpacity, View, ActivityIndicator, RefreshControl, Alert, Modal, TouchableWithoutFeedback, FlatList } from "react-native";
-import { COLORS, getStatusColor } from "@/assets/constants";
+import React, { useCallback, useRef, useState } from "react";
+import { ScrollView, Text, TouchableOpacity, View, ActivityIndicator, RefreshControl, Modal, TouchableWithoutFeedback, FlatList } from "react-native";
+import { COLORS, getStatusColor } from "../../../constants";
 import { Ionicons } from "@expo/vector-icons";
-import { dummyOrders, dummyUser } from "@/assets/assets";
+import { useAuth } from "@clerk/clerk-expo";
+import { useFocusEffect } from "expo-router";
+import axios from "axios";
+import api from "../../../constants/api";
+import Toast from "react-native-toast-message";
 
 export default function AdminOrders() {
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
-    const [orders, setOrders] = useState([]);
+    const [orders, setOrders] = useState<any[]>([]);
 
     // Status Modal State
     const [statusModalVisible, setStatusModalVisible] = useState(false);
@@ -16,34 +20,72 @@ export default function AdminOrders() {
 
     const STATUSES = ["placed", "processing", "shipped", "delivered", "cancelled"];
 
-    const fetchOrders = async () => {
-        setOrders(dummyOrders.map((order: any) => ({
-            ...order,
-            user: dummyUser
-        })) as any);
-        setLoading(false);
-        setRefreshing(false);
-    };
+    const { getToken, isLoaded, isSignedIn, userId } = useAuth();
+    const tokenRef = useRef(getToken);
+    tokenRef.current = getToken;
+    const owner = useRef(userId);
+    owner.current = userId;
+    const [error, setError] = useState("");
+    const [statusError, setStatusError] = useState("");
+    const [retry, setRetry] = useState(0);
+    const failureMessage = (cause: unknown) => axios.isAxiosError(cause) ? cause.response?.data?.message || cause.message : cause instanceof Error ? cause.message : "Request failed.";
 
-    useEffect(() => {
-        fetchOrders();
-    }, []);
+    useFocusEffect(useCallback(() => {
+        if (!isLoaded) return;
+        let active = true;
+        const controller = new AbortController();
+        setError("");
+        const fetchOrders = async () => {
+            try {
+                if (!isSignedIn) { setOrders([]); throw new Error("Sign in as an admin to view orders."); }
+                const token = await tokenRef.current();
+                if (!token) throw new Error("Please sign in again.");
+                const allOrders: any[] = [];
+                let pages = 1;
+                for (let page = 1; page <= pages; page++) {
+                    const { data } = await api.get('/orders/admin/all', { headers: { Authorization: 'Bearer ' + token }, params: { page, limit: 100 }, signal: controller.signal });
+                    if (!data.success || !Array.isArray(data.data)) throw new Error(data.message || "Could not load orders.");
+                    allOrders.push(...data.data);
+                    pages = data.pagination?.pages || 1;
+                }
+                if (active) setOrders([...new Map(allOrders.map(order => [order._id, order])).values()]);
+            } catch (cause) { if (active) { setOrders([]); setError(failureMessage(cause)); } }
+            finally { if (active) { setLoading(false); setRefreshing(false); } }
+        };
+        setLoading(true);
+        setStatusModalVisible(false);
+        void fetchOrders();
+        return () => { active = false; controller.abort(); };
+    }, [isLoaded, isSignedIn, userId, retry]));
 
-    const onRefresh = () => {
-        setRefreshing(true);
-        fetchOrders();
-    };
+    const onRefresh = () => { setRefreshing(true); setRetry(value => value + 1); };
 
     const openStatusModal = (order: any) => {
+        if (updating) return;
+        setStatusError("");
         setSelectedOrder(order);
         setStatusModalVisible(true);
     };
 
     const updateStatus = async (newStatus: string) => {
-        if (!selectedOrder) return;
-        setOrders(orders.map((order: any) => order._id === selectedOrder._id ? { ...order, orderStatus: newStatus } : order) as any);
-        setStatusModalVisible(false);
-        setUpdating(false);
+        if (!selectedOrder || updating) return;
+        const currentOwner = userId;
+        setUpdating(true);
+        setStatusError("");
+        try {
+            const token = await tokenRef.current();
+            if (!token || owner.current !== currentOwner) throw new Error("Please sign in again.");
+            const { data } = await api.put('/orders/' + encodeURIComponent(selectedOrder._id) + '/status', { orderStatus: newStatus }, { headers: { Authorization: 'Bearer ' + token } });
+            if (!data.success || !data.data) throw new Error(data.message || "Could not update status.");
+            // Verify the saved record before showing success.
+            const verified = await api.get('/orders/' + encodeURIComponent(selectedOrder._id), { headers: { Authorization: 'Bearer ' + token } });
+            if (!verified.data.success || verified.data.data?.orderStatus !== newStatus) throw new Error("The saved order status could not be verified. Refresh and try again.");
+            if (owner.current !== currentOwner) return;
+            setOrders(previous => previous.map(order => order._id === selectedOrder._id ? { ...order, orderStatus: data.data.orderStatus, paymentStatus: data.data.paymentStatus, deliveredAt: data.data.deliveredAt } : order));
+            setStatusModalVisible(false);
+            Toast.show({ type: "success", text1: "Order status updated" });
+        } catch (cause) { if (owner.current === currentOwner) setStatusError(failureMessage(cause)); }
+        finally { setUpdating(false); }
     };
 
     if (loading && !refreshing) {
@@ -56,13 +98,14 @@ export default function AdminOrders() {
 
     return (
         <View className="flex-1 bg-surface">
+            {error ? <View className="items-center px-4 py-3"><Text className="mb-2 text-red-600">{error}</Text><TouchableOpacity onPress={onRefresh}><Text className="font-bold text-primary">Retry</Text></TouchableOpacity></View> : null}
             <ScrollView
                 className="flex-1 p-4"
                 refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
             >
                 {orders.length === 0 ? (
                     <View className="flex-1 justify-center items-center mt-20">
-                        <Text className="text-secondary">No orders found</Text>
+                        <Text className="text-secondary">{error ? "Orders unavailable" : "No orders found"}</Text>
                     </View>
                 ) : (
                     orders.map((order: any) => (
@@ -125,8 +168,8 @@ export default function AdminOrders() {
             </ScrollView>
 
             {/* STATUS MODAL */}
-            <Modal visible={statusModalVisible} animationType="fade" transparent>
-                <TouchableWithoutFeedback onPress={() => setStatusModalVisible(false)}>
+            <Modal visible={statusModalVisible} animationType="fade" transparent onRequestClose={() => { if (!updating) setStatusModalVisible(false); }}>
+                <TouchableWithoutFeedback onPress={() => { if (!updating) setStatusModalVisible(false); }}>
                     <View className="flex-1 justify-end bg-black/50">
                         <View className="bg-white rounded-t-2xl p-4 max-h-[60%]">
                             <View className="flex-row justify-between items-center mb-4 pb-4 border-b border-gray-100">
@@ -138,6 +181,7 @@ export default function AdminOrders() {
                                 </TouchableOpacity>
                             </View>
 
+                            {statusError ? <Text accessibilityRole="alert" className="mb-4 text-red-600">{statusError}</Text> : null}
                             {updating ? (
                                 <View className="py-8">
                                     <ActivityIndicator size="large" color={COLORS.primary} />

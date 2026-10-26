@@ -6,7 +6,8 @@
   "scripts": {
     "start": "tsx server.ts",
     "server": "nodemon --exec tsx server.ts",
-    "build": "tsc"
+    "build": "tsc",
+    "migrate:products": "tsx migrations/001-asset-products.ts"
   },
   "type": "module",
   "keywords": [],

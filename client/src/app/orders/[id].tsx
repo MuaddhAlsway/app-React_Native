@@ -1,26 +1,58 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useLocalSearchParams } from "expo-router";
-import React, { useEffect, useState } from "react";
-import { Image, ScrollView, Text, View, ActivityIndicator } from "react-native";
+import { useLocalSearchParams, useFocusEffect } from "expo-router";
+import React, { useCallback, useRef, useState } from "react";
+import { Image, ScrollView, Text, View, ActivityIndicator, AppState, TouchableOpacity } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Header from "@/components/Header";
-import { COLORS } from "@/assets/constants";
+import { COLORS, getStatusColor } from "@/assets/constants";
 import type { Order, Product } from "@/assets/constants/types";
-import { dummyOrders } from "@/assets/assets";
+import { useAuth } from "@clerk/clerk-expo";
+import axios from "axios";
+import api from "../../../constants/api";
 
 export default function OrderDetails() {
-    const { id } = useLocalSearchParams();
+    const { id } = useLocalSearchParams<{ id: string }>();
     const [order, setOrder] = useState<Order | null>(null);
     const [loading, setLoading] = useState(true);
 
-    const fetchOrderDetails = async () => {
-        setOrder(dummyOrders.find((order) => order._id === id) as any);
-        setLoading(false);
-    };
-
-    useEffect(() => {
-        fetchOrderDetails();
-    }, [id]);
+    const { getToken, isLoaded, isSignedIn, userId } = useAuth();
+    const getTokenRef = useRef(getToken);
+    getTokenRef.current = getToken;
+    const [error, setError] = useState("");
+    const [retry, setRetry] = useState(0);
+    useFocusEffect(useCallback(() => {
+        if (!isLoaded) return;
+        let active = true;
+        let fetching = false;
+        const controller = new AbortController();
+        setLoading(true);
+        setOrder(null);
+        setError("");
+        const fetchOrderDetails = async () => {
+            if (!active || fetching) return;
+            fetching = true;
+            try {
+                if (!isSignedIn) throw new Error("Sign in to view this order.");
+                if (!id) throw new Error("Order ID is missing.");
+                const token = await getTokenRef.current();
+                if (!token) throw new Error("Please sign in again.");
+                const { data } = await api.get('/orders/' + encodeURIComponent(id), { headers: { Authorization: 'Bearer ' + token }, signal: controller.signal });
+                if (!data.success || !data.data) throw new Error(data.message || "Order not found.");
+                if (active) { setOrder(data.data); setError(""); }
+            } catch (error) {
+                if (active) setError(axios.isAxiosError(error) ? error.response?.data?.message || error.message : error instanceof Error ? error.message : "Could not load order.");
+            } finally { fetching = false; if (active) setLoading(false); }
+        };
+        void fetchOrderDetails();
+        // Refresh only while this screen is focused and the app is active.
+        const timer = setInterval(() => {
+            if (AppState.currentState === "active") void fetchOrderDetails();
+        }, 15000);
+        const subscription = AppState.addEventListener("change", state => {
+            if (state === "active") void fetchOrderDetails();
+        });
+        return () => { active = false; clearInterval(timer); subscription.remove(); controller.abort(); };
+    }, [id, isLoaded, isSignedIn, userId, retry]));
 
     if (loading) {
         return (
@@ -33,7 +65,9 @@ export default function OrderDetails() {
     if (!order) {
         return (
             <SafeAreaView className="flex-1 bg-surface justify-center items-center">
-                <Text>Order not found</Text>
+                <Header title="Order Details" showBack />
+                <Text className="my-4 text-secondary">{error || "Order not found"}</Text>
+                <TouchableOpacity onPress={() => setRetry(value => value + 1)} accessibilityRole="button"><Text className="font-bold text-primary">Retry</Text></TouchableOpacity>
             </SafeAreaView>
         );
     }
@@ -47,7 +81,7 @@ export default function OrderDetails() {
         { title: "Order Placed", date: formatDate(order.createdAt), completed: true },
         { title: "Processing", date: "", completed: ['processing', 'shipped', 'delivered'].includes(order.orderStatus) },
         { title: "Shipped", date: "", completed: ['shipped', 'delivered'].includes(order.orderStatus) },
-        { title: "Delivered", date: "", completed: order.orderStatus === 'delivered' },
+        { title: "Delivered", date: order.deliveredAt ? formatDate(order.deliveredAt) : "", completed: order.orderStatus === 'delivered' },
     ];
 
     return (
@@ -57,7 +91,14 @@ export default function OrderDetails() {
             <ScrollView className="flex-1 px-4 pt-4">
                 {/* Order Status */}
                 <View className="bg-white p-4 rounded-xl mb-4 border border-gray-100">
-                    <Text className="text-lg font-bold text-primary mb-4">Order Status</Text>
+                    <View className="mb-4 flex-row items-center justify-between">
+                        <Text className="text-lg font-bold text-primary">Order Status</Text>
+                        <View className={"rounded-full px-3 py-1 " + getStatusColor(order.orderStatus)}>
+                            <Text className="font-bold capitalize">{order.orderStatus}</Text>
+                        </View>
+                    </View>
+                    {error ? <Text accessibilityRole="alert" className="mb-3 text-red-600">{error}</Text> : null}
+                    <TouchableOpacity accessibilityRole="button" onPress={() => setRetry(value => value + 1)}><Text className="mb-4 text-primary">Refresh status</Text></TouchableOpacity>
 
                     {ORDER_STEPS.map((step, index) => (
                         <View key={index} className="flex-row mb-4 last:mb-0">
@@ -120,21 +161,21 @@ export default function OrderDetails() {
                     <View className="flex-row justify-between mb-2">
                         <Text className="text-secondary">Payment Status</Text>
                         <Text className={`font-medium capitalize ${order.paymentStatus === 'paid' ? 'text-green-600' : order.paymentStatus === 'failed' ? 'text-red-600' : 'text-orange-500'}`}>
-                            {order.paymentStatus}
+                            {order.paymentStatus || "Unknown"}
                         </Text>
                     </View>
                     <View className="h-px bg-gray-100 my-2" />
                     <View className="flex-row justify-between mb-2">
                         <Text className="text-secondary">Subtotal</Text>
-                        <Text className="text-primary font-medium">${order.subtotal.toFixed(2)}</Text>
+                        <Text className="text-primary font-medium">${(order.subtotal ?? order.items.reduce((sum, item) => sum + item.price * item.quantity, 0)).toFixed(2)}</Text>
                     </View>
                     <View className="flex-row justify-between mb-2">
                         <Text className="text-secondary">Shipping</Text>
-                        <Text className="text-primary font-medium">${order.shippingCost.toFixed(2)}</Text>
+                        <Text className="text-primary font-medium">{order.shippingCost == null ? "Not recorded" : "$" + order.shippingCost.toFixed(2)}</Text>
                     </View>
                     <View className="flex-row justify-between mb-2">
                         <Text className="text-secondary">Tax</Text>
-                        <Text className="text-primary font-medium">${order.tax.toFixed(2)}</Text>
+                        <Text className="text-primary font-medium">${(order.tax ?? 0).toFixed(2)}</Text>
                     </View>
                     <View className="h-px bg-gray-100 my-2" />
                     <View className="flex-row justify-between">

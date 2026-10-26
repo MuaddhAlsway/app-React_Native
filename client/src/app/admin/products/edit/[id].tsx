@@ -5,10 +5,14 @@ import Toast from 'react-native-toast-message';
 import { COLORS, CATEGORIES } from "@/assets/constants";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
-import { dummyProducts } from "@/assets/assets";
+import axios from "axios";
+import { appendProductImages } from "../../../../../utils/productImages";
+import { useAuth } from "@clerk/clerk-expo";
+import api from "../../../../../constants/api";
 
 export default function EditProduct() {
-    const { id } = useLocalSearchParams();
+    const {getToken} = useAuth()
+    const { id } = useLocalSearchParams<{ id: string }>();
     const router = useRouter();
 
     const [loading, setLoading] = useState(true);
@@ -26,53 +30,52 @@ export default function EditProduct() {
 
     // Image State
     const [existingImages, setExistingImages] = useState<string[]>([]);
-    const [newImages, setNewImages] = useState<string[]>([]);
+    const [newImages, setNewImages] = useState<ImagePicker.ImagePickerAsset[]>([]);
 
     useEffect(() => {
+        let active = true;
         const fetchProduct = async () => {
             try {
-                const product: any = dummyProducts.find((p) => p._id === id);
-                setName(product.name);
+                if (!id) throw new Error("Product ID is missing.");
+                const { data } = await api.get('/products/' + encodeURIComponent(id));
+                if (!data.success || !data.data) throw new Error(data.message || "Product not found.");
+                if (!active) return;
+                const product = data.data;
+                setName(product.name || "");
                 setDescription(product.description || "");
-                setPrice(product.price.toString());
-                setStock(product.stock.toString());
-                setCategory(typeof product.category === 'object' ? product.category.name : product.category);
-                setIsFeatured(product.isFeatured);
-
-                if (product.sizes) setSizes(Array.isArray(product.sizes) ? product.sizes.join(", ") : product.sizes);
-
-                if (product.images && Array.isArray(product.images)) {
-                    setExistingImages(product.images);
-                } else if (product.images) {
-                    setExistingImages([product.images]);
-                }
-            } catch (error: any) {
-                console.error("Failed to fetch product:", error);
-                Toast.show({
-                    type: 'error',
-                    text1: 'Failed to Fetch Product',
-                    text2: error.response?.data?.message || "Something went wrong"
-                });
-                router.back();
+                setPrice(String(product.price ?? ""));
+                setStock(String(product.stock ?? 0));
+                setCategory(typeof product.category === 'object' ? product.category?.name || "" : product.category || "");
+                setIsFeatured(Boolean(product.isFeatured));
+                setSizes(Array.isArray(product.sizes) ? product.sizes.join(", ") : typeof product.sizes === "string" ? product.sizes : "");
+                setExistingImages(Array.isArray(product.images) ? product.images.filter((image: unknown) => typeof image === "string") : typeof product.images === "string" ? [product.images] : []);
+                setNewImages([]);
+            } catch (error) {
+                if (!active) return;
+                Toast.show({ type: "error", text1: "Failed to Fetch Product", text2: axios.isAxiosError(error) ? error.response?.data?.message || error.message : error instanceof Error ? error.message : "Something went wrong" });
+                (router.canGoBack() ? router.back() : router.replace('/admin/products'));
             } finally {
-                setLoading(false);
+                if (active) setLoading(false);
             }
         };
-
-        if (id) fetchProduct();
-    }, [id]);
+        setLoading(true);
+        void fetchProduct();
+        return () => { active = false; };
+    }, [id, router]);
 
     const pickImages = async () => {
-        const result = await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ImagePicker.MediaTypeOptions.Images,
-            allowsMultipleSelection: true,
-            selectionLimit: 5 - (existingImages.length + newImages.length),
-            quality: 0.8,
-        });
-
-        if (!result.canceled) {
-            const uris = result.assets.map((asset) => asset.uri);
-            setNewImages([...newImages, ...uris]);
+        const remaining = 5 - existingImages.length - newImages.length;
+        if (remaining <= 0) return;
+        try {
+            const result = await ImagePicker.launchImageLibraryAsync({
+                mediaTypes: ["images"], allowsMultipleSelection: true,
+                selectionLimit: remaining, quality: 0.8,
+            });
+            if (!result.canceled) {
+                setNewImages(previous => [...previous, ...result.assets].slice(0, 5 - existingImages.length));
+            }
+        } catch (error) {
+            Toast.show({ type: "error", text1: "Could not select images", text2: error instanceof Error ? error.message : "Please try again." });
         }
     };
 
@@ -89,50 +92,50 @@ export default function EditProduct() {
     };
 
     const handleSubmit = async () => {
-        if (!name || !price || sizes.length < 1) {
-            Toast.show({
-                type: 'error',
-                text1: 'Missing Fields',
-                text2: 'Please fill in all required fields'
-            });
+        if (submitting) return;
+        const parsedSizes = sizes.split(",").map(size => size.trim()).filter(Boolean);
+        const parsedPrice = Number(price);
+        const parsedStock = Number(stock || "0");
+        if (!name.trim() || !description.trim() || !category || !price.trim() || !parsedSizes.length || !Number.isFinite(parsedPrice) || parsedPrice <= 0 || !Number.isInteger(parsedStock) || parsedStock < 0) {
+            Toast.show({ type: "error", text1: "Invalid product", text2: "Enter a name, description, category, sizes, a positive price, and valid stock." });
             return;
         }
-
+        if (existingImages.length + newImages.length < 1 || existingImages.length + newImages.length > 5) {
+            Toast.show({ type: "error", text1: "Images required", text2: "Keep between one and five product images." });
+            return;
+        }
         try {
             setSubmitting(true);
+            const token = await getToken();
+            if (!token) throw new Error("Please sign in and try again.");
             const formData = new FormData();
-
-            formData.append("name", name);
-            formData.append("description", description);
-            formData.append("price", price);
-            formData.append("stock", stock);
+            formData.append("name", name.trim());
+            formData.append("description", description.trim());
+            formData.append("price", String(parsedPrice));
+            formData.append("stock", String(parsedStock));
             formData.append("category", category);
             formData.append("isFeatured", String(isFeatured));
-            formData.append("sizes", sizes);
-
-            // Append existing images
-            existingImages.forEach((img) => {
-                formData.append("existingImages", img);
+            formData.append("sizes", JSON.stringify(parsedSizes));
+            // An explicit empty array means all original images were removed.
+            formData.append("existingImages", JSON.stringify(existingImages));
+            if (newImages.length) await appendProductImages(formData, newImages, Platform.OS);
+            if (!api.defaults.baseURL || !id) throw new Error("Product API is not configured.");
+            const response = await fetch(api.defaults.baseURL + '/products/' + encodeURIComponent(id), {
+                method: "PUT", headers: { Authorization: 'Bearer ' + token }, body: formData,
             });
-
-            // Append new images
-            for (const [i, uri] of newImages.entries()) {
-                const filename = `new-image-${i}.jpg`;
-                if (Platform.OS === "web") {
-                    const blob = await (await fetch(uri)).blob();
-                    formData.append("images", new File([blob], filename, { type: "image/jpeg" }));
-                } else {
-                    formData.append("images", { uri, name: filename, type: "image/jpeg" } as any);
-                }
+            const result = await response.json().catch(() => null);
+            if (!response.ok || !result?.success) throw new Error(result?.message || "Could not update product.");
+            const saved = result.data;
+            if (!Array.isArray(saved?.sizes) || JSON.stringify(saved.sizes) !== JSON.stringify(parsedSizes)) {
+                throw new Error("The running backend did not save sizes. Restart Express from the updated server folder, then save again.");
             }
-            router.back();
-        } catch (error: any) {
-            console.error("Failed to update product:", error);
-            Toast.show({
-                type: 'error',
-                text1: 'Failed to Update Product',
-                text2: error.response?.data?.message || "Something went wrong"
-            });
+            if (!Array.isArray(saved?.images) || saved.images.some((image: unknown) => typeof image !== "string" || !/^https?:\/\//.test(image))) {
+                throw new Error("The running backend saved invalid image URLs. Restart Express from the updated server folder before saving again.");
+            }
+            Toast.show({ type: "success", text1: "Product updated" });
+            router.replace('/admin/products'); 
+        } catch (error) {
+            Toast.show({ type: "error", text1: "Failed to Update Product", text2: error instanceof Error ? error.message : "Something went wrong" });
         } finally {
             setSubmitting(false);
         }
@@ -233,7 +236,7 @@ export default function EditProduct() {
                                 </TouchableOpacity>
                             </View>
                         ))}
-                        {newImages.map((uri, index) => (
+                        {newImages.map(({ uri }, index) => (
                             <View key={`new-${index}`} className="relative mr-2">
                                 <Image source={{ uri }} className="w-24 h-24 rounded-lg border-2 border-primary" />
                                 <TouchableOpacity

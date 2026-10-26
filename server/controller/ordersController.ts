@@ -2,80 +2,68 @@ import type { Request, Response } from 'express'
 import Cart from '../models/Cart.js'
 import Order from '../models/order.js'
 import Product from '../models/Products.js'
+import Address from '../models/Address.js'
+import mongoose from 'mongoose'
+import { randomUUID } from 'node:crypto'
 
 // Create order from the user's cart
 // POST /api/orders
+class CheckoutError extends Error {
+    constructor(message: string, public status = 400) { super(message) }
+}
+
 export const createOrder = async (req: Request, res: Response) => {
+    const { addressId, paymentMethod, notes } = req.body
+    if (!mongoose.isObjectIdOrHexString(addressId)) {
+        return res.status(400).json({ success: false, message: 'Select a valid saved shipping address.' })
+    }
+    if (paymentMethod !== 'cash') {
+        return res.status(400).json({ success: false, message: 'Only cash on delivery is available. Card payment is not implemented.' })
+    }
+    const session = await mongoose.startSession()
     try {
-        const { shippingAddress, paymentMethod, notes, paymentIntentId } = req.body
-
-        if (!shippingAddress || !paymentMethod) {
-            return res.status(400).json({
-                success: false,
-                message: 'Shipping address and payment method are required',
+        const order = await session.withTransaction(async () => {
+            const address = await Address.findOne({ _id: addressId, user: req.user._id }).session(session)
+            if (!address) throw new CheckoutError('Shipping address not found.', 404)
+            const cart = await Cart.findOne({ user: req.user._id }).session(session).populate('items.product')
+            if (!cart || cart.items.length === 0) throw new CheckoutError('Cart is empty.')
+            const quantities = new Map<string, number>()
+            let subtotalCents = 0
+            const items = cart.items.map((item: any) => {
+                const product = item.product
+                if (!product || !product.isActive) throw new CheckoutError('A cart product is no longer available.')
+                if (!Number.isInteger(item.quantity) || item.quantity < 1 || !Number.isFinite(item.price) || item.price < 0) throw new CheckoutError('Invalid cart item.')
+                if (product.sizes?.length && !product.sizes.includes(item.size)) throw new CheckoutError('A selected size is no longer available.')
+                const id = String(product._id)
+                quantities.set(id, (quantities.get(id) || 0) + item.quantity)
+                subtotalCents += Math.round(item.price * 100) * item.quantity
+                return { product: product._id, name: product.name, quantity: item.quantity, price: item.price, size: item.size }
             })
-        }
-
-        const cart = await Cart.findOne({ user: req.user._id })
-            .populate('items.product')
-
-        if (!cart || cart.items.length === 0) {
-            return res.status(400).json({
-                success: false,
-                message: 'Cart is empty',
-            })
-        }
-
-        const orderItems = cart.items.map((item: any) => ({
-            product: item.product._id,
-            name: item.product.name,
-            quantity: item.quantity,
-            price: item.price,
-            size: item.size,
-        }))
-
-        for (const item of cart.items) {
-            const product = await Product.findById(item.product._id)
-
-            if (!product || product.stock < item.quantity) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'Insufficient product stock',
-                })
+            // Aggregate sizes of the same product before reserving stock.
+            for (const [id, quantity] of quantities) {
+                const result = await Product.updateOne({ _id: id, isActive: true, stock: { $gte: quantity } }, { $inc: { stock: -quantity } }, { session })
+                if (result.modifiedCount !== 1) throw new CheckoutError('Insufficient product stock.')
             }
-
-            product.stock -= item.quantity
-            await product.save()
-        }
-
-        const subtotal = cart.items.reduce(
-            (total: number, item: any) => total + item.price * item.quantity,
-            0,
-        )
-
-        const order = await Order.create({
-            user: req.user._id,
-            orderNumber: `ORD-${Date.now()}`,
-            items: orderItems,
-            shippingAddress,
-            paymentMethod,
-            orderStatus: 'placed',
-            tax: 0,
-            totalAmount: subtotal,
-            notes,
-            paymentIntentId,
-        })
-
-        if (paymentMethod !== 'stripe') {
+            const subtotal = subtotalCents / 100
+            const shippingCost = 2
+            const tax = 0
+            const [created] = await Order.create([{
+                user: req.user._id, orderNumber: 'ORD-' + randomUUID(), items,
+                shippingAddress: { street: address.street, city: address.city, state: address.state, zipCode: address.zipCode, country: address.country },
+                paymentMethod: 'cash', paymentStatus: 'pending', orderStatus: 'placed',
+                subtotal, shippingCost, tax, totalAmount: (subtotalCents + 200) / 100,
+                notes: typeof notes === 'string' ? notes.trim() : undefined,
+            }], { session })
             cart.items = []
             cart.totalAmount = 0
-            await cart.save()
-        }
-
+            await cart.save({ session })
+            return created
+        })
         return res.status(201).json({ success: true, data: order })
-    } catch (error: any) {
-        return res.status(500).json({ success: false, message: error.message })
-    }
+    } catch (error) {
+        if (error instanceof CheckoutError) return res.status(error.status).json({ success: false, message: error.message })
+        return res.status(500).json({ success: false, message: 'Could not place order. No partial checkout changes were committed.' })
+    } finally { await session.endSession() }
 }
 
 // Get signed-in user's orders

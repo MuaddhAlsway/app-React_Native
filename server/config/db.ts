@@ -64,38 +64,24 @@ function classifyMongoError(error: unknown): Error {
   return classified;
 }
 
+let connectionPromise: Promise<typeof mongoose> | null = null;
+
+mongoose.connection.on("error", () => {
+  console.error("MongoDB connection error. Check database configuration and connectivity.");
+});
+
 const connectDB = async (): Promise<void> => {
-  const mongoUri = process.env.MONGODB_URI?.trim();
-
-  if (!mongoUri) {
-    throw new Error(
-      "MONGODB_URI is not defined. Add it to server/.env (never commit it)."
-    );
-  }
-
-  const uriScheme = mongoUri.match(/^mongodb(\+srv)?:\/\//i)?.[0]?.replace(/:\/\/$/, "") ?? "unknown";
-  console.log(`MongoDB URI scheme: ${uriScheme}`);
-
-  if (!/^mongodb(\+srv)?:\/\//i.test(mongoUri)) {
-    throw new Error("MONGODB_URI has an invalid scheme. Expected mongodb:// or mongodb+srv://.");
-  }
-
-  mongoose.connection.on("connected", () => {
-    console.log("MongoDB connected");
-  });
-
-  try {
-    await mongoose.connect(mongoUri, {
-      serverSelectionTimeoutMS: 15000,
+  if (mongoose.connection.readyState === 1) return;
+  if (!connectionPromise) {
+    const mongoUri = process.env.MONGODB_URI?.trim();
+    if (!mongoUri) throw new Error("MONGODB_URI is not defined in the server environment.");
+    if (!/^mongodb(\+srv)?:\/\//i.test(mongoUri)) throw new Error("MONGODB_URI has an invalid scheme.");
+    connectionPromise = mongoose.connect(mongoUri, { serverSelectionTimeoutMS: 15000 }).catch(error => {
+      connectionPromise = null;
+      throw classifyMongoError(error);
     });
-  } catch (error) {
-    throw classifyMongoError(error);
   }
-
-  mongoose.connection.on("error", (error: unknown) => {
-    const message = redactSecrets(String((error as { message?: string })?.message ?? error));
-    console.error("MongoDB connection error:", message);
-  });
+  await connectionPromise;
 };
 
 export default connectDB;
